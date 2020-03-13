@@ -1,0 +1,296 @@
+
+
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport"
+          content="width=device-width, user-scalable=no, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="ie=edge">
+    <title>Document</title>
+    <link rel="stylesheet" href="./layui/css/layui.css">
+</head>
+<style>
+    body{
+        background:#eee;
+    }
+    .title{
+        margin-top: 50px;
+    }
+
+    .content{
+        height: 700px;
+        margin-top: 5px;
+        padding-top: 20px;
+        background: #ffffff;
+    }
+</style>
+<body>
+<div class="layui-row layui-col-space5" id="example">
+    <div class="layui-col-md12">
+        <div class="layui-row grid-demo">
+            <div class="layui-col-md10 layui-col-md-offset1 title">
+                <ul class="layui-nav" lay-filter="">
+                    <li class="layui-nav-item" :class="{'layui-this':tabIndex==index}" @click="confs(item,index)" v-for="(item,index) in tablist"><a href="javascript:;">{{item}}</a></li>
+                </ul>
+            </div>
+            <div class="layui-col-md10 layui-col-md-offset1 content" v-if="tabIndex==0">
+                <form class="layui-form" action="" method="post">
+                    <div class="layui-form-item">
+                        <label class="layui-form-label">学校id</label>
+                        <div class="layui-input-block">
+                            <input type="number" name="school_id" v-model="form_data.school_id" required  lay-verify="required" placeholder="请输入学校id" autocomplete="off" class="layui-input">
+                        </div>
+                    </div>
+                    <div class="layui-form-item">
+                        <label class="layui-form-label">安装通道数量</label>
+                        <div class="layui-input-block">
+                            <input type="number" name="door_num" v-model="form_data.door_num" required  lay-verify="required" placeholder="请输入安装通道数量" autocomplete="off" class="layui-input">
+                        </div>
+                    </div>
+                    <div class="layui-form-item">
+                        <label class="layui-form-label">图片上传地址</label>
+                        <div class="layui-input-block">
+                            <input type="text" name="url" required v-model="form_data.url" lay-verify="required" placeholder="请输入图片上报地址" autocomplete="off" class="layui-input">
+                        </div>
+                    </div>
+                    <div class="layui-form-item">
+                        <label class="layui-form-label">摄像头地址前缀</label>
+                        <div class="layui-input-block">
+                            <input type="text" name="camera_ip" v-model="form_data.camera_ip" required  lay-verify="required" placeholder="请输入摄像头地址前缀" autocomplete="off" class="layui-input">
+                        </div>
+                    </div>
+
+
+                    <div class="layui-form-item">
+                        <label class="layui-form-label">是否开启刷卡视频抓拍</label>
+                        <div class="layui-input-block">
+                            <input type="radio" style="display: inline-block" v-model="form_data.switch" :value="0" title="关闭"> 关闭
+                            <input type="radio" style="display: inline-block" v-model="form_data.switch" :value="1" title="开启"> 开启
+                        </div>
+                    </div>
+
+                    <!--<div class="layui-form-item">-->
+                        <!--<label class="layui-form-label">是否开启刷卡视频抓拍</label>-->
+                        <!--<div class="layui-input-block">-->
+                            <!--<input type="checkbox" name="switch" v-model="form_data.switch" lay-skin="switch">-->
+                        <!--</div>-->
+                    <!--</div>-->
+
+                    <div class="layui-form-item">
+                        <label class="layui-form-label">摄像头用户名</label>
+                        <div class="layui-input-block">
+                            <input type="text" name="camera_uname" v-model="form_data.camera_uname" value="admin" required  lay-verify="required" placeholder="请输入摄像头用户名" autocomplete="off" class="layui-input">
+                        </div>
+                    </div>
+                    <div class="layui-form-item">
+                        <label class="layui-form-label">摄像头密码</label>
+                        <div class="layui-input-block">
+                            <input type="text" name="camera_pwd" v-model="form_data.camera_pwd" required  lay-verify="required" placeholder="请输入摄像头密码" autocomplete="off" class="layui-input">
+                        </div>
+                    </div>
+
+                    <div class="layui-form-item" style="margin: auto">
+                        <div class="layui-input-block">
+                            <button type="button" class="layui-btn" @click="saves">立即提交</button>
+                            <button type="reset" class="layui-btn layui-btn-primary">重置</button>
+                        </div>
+                    </div>
+                </form>
+            </div>
+            <div class="layui-col-md10 layui-col-md-offset1 content"  v-if="tabIndex==1" style="overflow-y:auto;">
+                <table class="layui-table">
+                    <colgroup>
+                        <col width="150">
+                        <col width="200">
+                        <col>
+                    </colgroup>
+                    <thead>
+                    <tr>
+                        <th>通道号</th>
+                        <th>进出</th>
+                        <th>ip</th>
+                        <th>状态</th>
+                        <th>图片</th>
+                        <th>操作</th>
+                    </tr>
+                    </thead>
+                    <tbody v-for="(list,index) in door_list">
+                        <tr>
+                            <td rowspan="2">{{index}}</td>
+                            <td>进</td>
+                            <td>
+                                {{list[1]}}
+                            </td>
+                            <td>{{ ip_status[list[1]] }}</td>
+                            <td>
+                                <a :href="images_list[list[1]]" target="_blank">
+                                    <img :src="images_list[list[1]]" alt="">
+                                </a>
+                            </td>
+                            <td><button type="button" @click="get_image(list[1])">抓拍</button></td>
+                        </tr>
+                        <tr>
+                            <td>出</td>
+                            <td>
+                                {{list[2]}}
+                            </td>
+                            <td>{{ ip_status[list[2]] }}</td>
+                            <td>
+                                <a :href="images_list[list[2]]" target="_blank">
+                                    <img :src="images_list[list[2]]" alt="">
+                                </a>
+                            </td>
+                            <td><button type="button" @click="get_image(list[2])">抓拍</button></td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+        </div>
+    </div>
+</div>
+
+</body>
+<script src="http://code.jquery.com/jquery-2.1.1.min.js"></script>
+<script src="./js/vue.js"></script>
+<script src="./layui/layui.js"></script>
+<script>
+    //注意：导航 依赖 element 模块，否则无法进行功能性操作
+    layui.use('element', function(){
+        var element = layui.element;
+
+        //…
+    });
+    new Vue({
+        el: '#example',
+        data:{
+            tablist:['配置','拍照测试'],
+            tabIndex:0,
+            confs_show:true,
+            form_data:{
+                school_id:'',
+                door_num:'',
+                url:'https://app.clovedu.cn/api',
+                camera_ip:'192.168.30.',
+                switch:0,
+                camera_uname:'admin',
+                camera_pwd:'',
+                type:1
+            },
+            images_list:[],  //抓拍测试列表
+            door_list:[],
+            check_camera:[],
+            images:[],
+            ip_status:[],
+        },
+        created: function () {
+            this.get_confs();
+            this.get_camera();
+        },
+        methods:{
+            confs:function(item,index){
+                this.tabIndex = index;
+                if(index == 1){
+                    this.get_ips();
+                }
+            },
+            get_confs:function(){
+                var self = this;
+                $.ajax({
+                    type : "POST", //提交方式
+                    url : "127.0.0.1",//路径
+                    data : {type:1},//获取 env
+                    dataType:'json',
+                    success : function(res) {//返回数据根据结果进行相应的处理
+                        console.log(res.data);
+                        if ( res.success ) {
+                            self.form_data.school_id = res.data.school_id;
+                            self.form_data.door_num = res.data.door_num;
+                            self.form_data.url = res.data.url;
+                            self.form_data.camera_ip = res.data.camera_ip;
+                            self.form_data.switch = res.data.switch;
+                            self.form_data.camera_uname = res.data.camera_uname;
+                            self.form_data.camera_pwd = res.data.camera_pwd;
+                        } else {
+                            layer.msg('操作失败');
+                        }
+                    }
+                });
+            },
+            saves:function(){
+                var self = this;
+                self.form_data.type = 2;  //修改env
+                $.ajax({
+                    type : "POST", //提交方式
+                    url : "127.0.0.1",//路径
+                    data : self.form_data,//数据，这里使用的是Json格式进行传输
+                    dataType:'json',
+                    success : function(res) {//返回数据根据结果进行相应的处理
+                        if ( res.success ) {
+                            alert('操作成功');
+
+                        } else {
+                            alert('操作失败');
+                        }
+                        self.form_data.type = 1;
+                    }
+                });
+            },
+            get_camera:function(){
+                var self = this;
+                $.ajax({
+                    type : "POST", //提交方式
+                    url : "127.0.0.1",//路径
+                    data : {type:3},//检测摄像头
+                    dataType:'json',
+                    success : function(res) {//返回数据根据结果进行相应的处理
+                        console.log(res.data);
+                        if ( res.success ) {
+                            self.ip_status = res.data;
+                        } else {
+                            layer.msg('操作失败');
+                        }
+                    }
+                });
+            },
+            get_ips:function(){
+                var self = this;
+                self.door_list = [];
+                $.ajax({
+                    type : "POST", //提交方式
+                    url : "127.0.0.1",//路径
+                    data : {type:5},//检测摄像头
+                    dataType:'json',
+                    success : function(res) {//返回数据根据结果进行相应的处理
+                        console.log(res.data);
+                        if ( res.success ) {
+                            self.door_list = res.data.list;
+                            self.images_list = res.data.images;
+                        } else {
+                            alert('操作失败');
+                        }
+                    }
+                });
+            },
+            get_image:function(ip){
+                var self = this;
+                self.images_list[ip] = '';
+                $.ajax({
+                    type : "POST", //提交方式
+                    url : "127.0.0.1",//路径
+                    data : {type:4,ip:ip},//检测摄像头
+                    dataType:'json',
+                    success : function(res) {//返回数据根据结果进行相应的处理
+                        if ( res.success ) {
+                            self.images_list[ip] = res.data;
+                        } else {
+                            alert(res.msg);
+                        }
+                    }
+                });
+            }
+        }
+    })
+</script>
+</html>
