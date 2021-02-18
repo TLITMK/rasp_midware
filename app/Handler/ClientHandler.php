@@ -680,12 +680,23 @@ class ClientHandler
             ];
         }
         $client=new Client();
-        $response=$client->request('POST',$url,[
-            'form_params' => [
-                'pass' => $pwd,
-                'faceId' => $personId,
-            ]
-        ]);
+        try{
+            $response=$client->request('POST',$url,[
+                'form_params' => [
+                    'pass' => $pwd,
+                    'faceId' => $personId,
+                ]
+            ]);
+
+        }catch (\Exception $e){
+            info($e->getMessage());
+            return [
+                'success'=>false,
+                'msg'=>'接口访问失败',
+                'data'=>''
+            ];
+        }
+
         $rt = json_decode($response->getBody(),true);
 
         info($url.'-清空照片-返回',$rt);

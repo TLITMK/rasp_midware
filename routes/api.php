@@ -18,3 +18,4 @@ Route::middleware('auth:api')->get('/user', function (Request $request) {
 });
 
 Route::post('/face_union_auth',"UnionAttController@face_union_auth");
+Route::post('/JLtest',"JLFACEController@test");

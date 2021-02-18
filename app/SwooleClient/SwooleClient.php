@@ -96,4 +96,42 @@ class SwooleClient
         $rt = $face->setNetInfo('192.168.30.102','192.168.30.8','spdc');
         dd($rt);
     }
+
+    public function start_client_test(){
+        $client = new swoole_client(SWOOLE_SOCK_TCP, SWOOLE_SOCK_ASYNC);
+
+        //注册连接成功回调
+        $client->on("connect", function($cli) {
+            $cli->send("hello world\n");
+        });
+
+//注册数据接收回调
+        $client->on("receive", function($cli, $data){
+            echo "Received: ".$data."\n";
+            info("Received: ".$data);
+        });
+
+//注册连接失败回调
+        $client->on("error", function($cli){
+
+            echo "Connect failed\n";
+            info("Connect failed: ");
+        });
+
+//注册连接关闭回调
+        $client->on("close", function($cli){
+            echo "Connection close\n";
+            info("Connect close: ");
+        });
+
+//发起连接
+        echo $client->connect('192.168.30.100', 12345, 0.5);
+
+        sleep(1);
+        while(1){
+            $client->send("心跳");
+            sleep(2);
+        }
+
+    }
 }

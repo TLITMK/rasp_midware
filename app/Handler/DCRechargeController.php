@@ -10,17 +10,25 @@ namespace App\Handler;
 
 //东川一中线上充值
 use GuzzleHttp\Client;
+use Illuminate\Support\Facades\DB;
 
 class DCRechargeController
 {
     public function get_recharges(){
         $client=new Client();
-        $response=$client->request('POST',env('CURL_URL').'/DC_get_recharges',[
+        try{
+            $response=$client->request('POST',env('CURL_URL').'/DC_get_recharges',[
+                'timeout'=>10,
             'form_params'=>[
                 'school_id'=>env('SCHOOL_ID'),
                 'count'=>20
             ]
         ]);
+        }catch (\Throwable $e){
+            info('无法访问三叶草-返回');
+            return ;
+        }
+
         $pay_list=json_decode($response->getBody(),true);
         info('获取三叶草consume_offlines任务成功',$pay_list);
         foreach($pay_list['data'] as $pay){
@@ -66,14 +74,21 @@ class DCRechargeController
             }
             info('获取Card_Info成功 人员id '.$old_card_info->P_ID);
             //写入离线数据库
-            $bool=\DB::update(
+            DB::beginTransaction();
+            $bool=DB::update(
                 'update Card_Info 
-                set Card_Ci=:Card_Ci,Card_Money=Card_Money+:Add_Money,Water_Money=Water_Money+0,Electric_Money=Electric_Money+0,Card_Ci_LS=:Card_Ci_LS ,Card_Moeny_LS=Card_Moeny_LS+1 ,End_Time=:End_Time 
+                set  /*Card_Ci=:Card_Ci,*/
+                Card_Money=Card_Money+:Add_Money,
+                Water_Money=Water_Money+0,
+                Electric_Money=Electric_Money+0,
+                /*Card_Ci_LS=:Card_Ci_LS ,*/
+                Card_Moeny_LS=Card_Moeny_LS+1 ,
+                End_Time=:End_Time 
                 where P_ID=:P_ID and Card_Loss=:Card_Loss',
                 [
-                    'Card_Ci'=>0,
+//                    'Card_Ci'=>0,
                     'Add_Money'=>$pay['money'],
-                    'Card_Ci_LS'=>0,
+//                    'Card_Ci_LS'=>0,
                     'End_Time'=>'2099-12-31',
                     'Card_Loss'=>0,
                     'P_ID'=>$old_card_info->P_ID
@@ -91,39 +106,50 @@ class DCRechargeController
                     ]);
                     $pay_suc=json_decode($response->getBody(),true);
                     info('修改三叶草consume_offline状态0',$pay_suc);
-                }catch (\Exception $e){
+                }catch (\Throwable $e){
                     info($e->getMessage());
+
+                    DB::rollback();
                 }
 
-                //插入充值记录
-                $rt=\DB::table('Record_XF')->insert([
-                    'CompanyID'=>592,
-                    'Mach_ID'=>-1,
-                    'P_ID'=>$old_card_info->P_ID,
-                    'CashierNo'=>0,
-                    'Card_Type_ID'=>$old_card_info->Card_Type_ID,
-                    'PlaceID'=>0,//充值地点,
-                    'XF_Type'=>200,//线上充值,
-                    'XF_Meal'=>0,
-                    'Money_Old'=>$old_card_info->Card_Money,
-                    'Money_Change'=>$pay['money'],
-                    'Money_New'=>$old_card_info->Card_Money+($pay['money']),
-                    'Card_QuHao'=>2,//????????
-                    'Card_LS'=>$old_card_info->Card_Moeny_LS+1,
-                    'Mach_LS'=>-3,
-                    'Date_Time'=>$pay['created_at'].'.'.explode('.',sprintf('%01.3f',microtime(true)))[1],
-                    'Card_No'=>$cardIdHEX,
-                    'Ci_Change'=>0,
-                    'Ci_LS'=>0,'Ci_New'=>0,
-                    'UnitID'=>784,//业主id
-                    'Cost_Code'=>1,
-                    'BtMoney_Change'=>0,
-                    'BtCi_Change'=>0,
-                    'Per_Value'=>10000
-                ]);
-                info('插入Record_XF成功'.$old_card_info->P_ID,[$rt]);
+                try{
+                    //插入充值记录
+                    $rt=DB::table('Record_XF')->insert([
+                        'CompanyID'=>592,
+                        'Mach_ID'=>-1,
+                        'P_ID'=>$old_card_info->P_ID,
+                        'CashierNo'=>0,
+                        'Card_Type_ID'=>$old_card_info->Card_Type_ID,
+                        'PlaceID'=>0,//充值地点,
+                        'XF_Type'=>200,//线上充值,
+                        'XF_Meal'=>0,
+                        'Money_Old'=>$old_card_info->Card_Money,
+                        'Money_Change'=>$pay['money'],
+                        'Money_New'=>$old_card_info->Card_Money+($pay['money']),
+                        'Card_QuHao'=>2,//????????
+                        'Card_LS'=>$old_card_info->Card_Moeny_LS+1,
+                        'Mach_LS'=>-3,
+                        'Date_Time'=>$pay['created_at'].'.'.explode('.',sprintf('%01.3f',microtime(true)))[1],
+                        'Card_No'=>$cardIdHEX,
+                        'Ci_Change'=>0,
+                        'Ci_LS'=>0,'Ci_New'=>0,
+                        'UnitID'=>784,//业主id
+                        'Cost_Code'=>1,
+                        'BtMoney_Change'=>0,
+                        'BtCi_Change'=>0,
+                        'Per_Value'=>10000
+                    ]);
+                    info('插入Record_XF成功'.$old_card_info->P_ID,[$rt]);
+                    DB::commit();
+                }catch (\Throwable $e){
+                    info($e->getMessage());
+                    DB::rollback();
+                }
+
             }else{
                 info('更新Card_Info表失败'.$old_card_info->P_ID);
+
+                DB::rollback();
                 //写入成功请求三叶草修改订单状态
                 $response=$client->request('POST',env('CURL_URL').'/DC_recharge_success',[
                     'form_params'=>[
@@ -134,7 +160,7 @@ class DCRechargeController
                 $pay_suc=json_decode($response->getBody(),true);
                 info('修改三叶草consume_offline状态-4',$pay_suc);
             }
-            usleep(1);
+            usleep(100000);
         }
     }
     public function sync_card_info(){
@@ -152,7 +178,7 @@ class DCRechargeController
         $arr=array_chunk($arr,28);
 
         foreach ($arr as $k=>$v){
-            print_r($k.'=>'.count($v));
+            print_r($k.'/'.count($arr).'=>'.count($v));
             $response=$client->request('POST',env('CURL_URL').'/DC_update_cardinfos',[
                 'form_params'=>[
                     'arr'=>$v,

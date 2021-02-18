@@ -12,7 +12,7 @@ class TestSnap extends Command
      *
      * @var string
      */
-    protected $signature = 'test_snap';
+    protected $signature = 'test_snap {ip}';
 
     /**
      * The console command description.
@@ -39,8 +39,9 @@ class TestSnap extends Command
     public function handle()
     {
         try {
-            $ip = 'http://192.168.30.6';
+            $ip = $this->argument('ip');
             $client = new Client();
+            echo env('CAMERA_USER_NAME','admin').':'.env('CAMERA_PWD','admin123').PHP_EOL;
             $rt = $client->request('GET', $ip.'/ISAPI/Streaming/channels/1/picture',
                 ['auth' => [env('CAMERA_USER_NAME','admin'), env('CAMERA_PWD','admin123')]]);
 

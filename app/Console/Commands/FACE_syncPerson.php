@@ -44,9 +44,14 @@ class FACE_syncPerson extends Command
     public function handle()
     {
         $this->drip->delAllRedisPerson();//删除redis记录，相当于新增全部人员
+//        $this->drip->delAllPersonAndReids();45555555555555555555
+        $ips=$this->drip->getAllFaceIps();
+        foreach ($ips as $ip){
+            $this->drip->delPerson($ip,-1);
+        }
         $this->drip->getAllPersons();
         $this->drip->personDeleteByReids();//注意顺序！！！！！
-        $this->drip->personCreateByRedis();
+        $this->drip->personCreateByRedis(36000);
         $this->drip->personUpdateByRedis();
 
     }

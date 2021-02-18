@@ -156,6 +156,8 @@ class FaceController
     }
     //
     public function del_face_photo($data){
+        info('旧版本facetask 删除照片 屏蔽');
+        return;
         //faceimg
         $success_idx=[];
         $fail_idx=[];
@@ -190,7 +192,7 @@ class FaceController
             $response=$client->request('POST',env('CURL_URL').'/update_faceimgs_operations',[
                 'form_params'=>[
                     'school_id'=>env('SCHOOL_ID',''),
-                    'student_id'=>$student_id
+                    'student_id'=>$student_id,
             ]
             ]);
             $res=json_decode($response->getBody(),true);

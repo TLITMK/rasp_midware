@@ -11,7 +11,6 @@ namespace App\Handler;
 use App\Services\Helper;
 use App\Services\Tools;
 use GuzzleHttp\Client;
-use http\Env;
 use Illuminate\Support\Facades\Redis;
 use Illuminate\Support\Facades\Storage;
 use SebastianBergmann\CodeCoverage\Report\PHP;
@@ -101,7 +100,6 @@ class FaceDetectController {
 				//联动卡
                 if($item['union_cards']){
                     $card_arr=explode(',',$item['union_cards']['card_id']);
-                    info('设置联动卡redis查询池'.$item['id'].'-'.$item['union_cards']['card_id']);
                     foreach ($card_arr as $card){
                         if($card){
                             Redis::set('UNION_CARD:'.$card,$item['id']);
@@ -188,131 +186,6 @@ class FaceDetectController {
 		}
 	}
 
-	public function sync_person_task(){
-	    $client=new Client();
-        $res = $client->request('POST', env('CURL_URL') . '/get_persons_task', [
-            'form_params' => [
-                'school_id' => env('SCHOOL_ID'),
-                'rasp'=>env('TERMINAL_NUM',false)
-            ],
-        ]);
-        $res = json_decode($res->getBody(), true);
-        info(count($res['data']).'个人员同步任务');
-
-
-        foreach ($res['data'] as $item){
-            $person_id=($item['type']=='student'?'':'t').$item['person_id'];
-            $ip=$item['terminal_ip'];
-            if(!$ip)continue;
-            $person_json=json_encode([
-                'id'=>$person_id,
-                'name'=>$item['type']=='student'?$item['person']['stu_name']:$item['person']['name'],
-                'idcardNum'=>$item['person']['card_id']
-            ]);
-            switch($item['func']){
-                case 'ADD':
-                    $hasPerson = $this->personFind($item['terminal_ip'], $person_id);
-                    if ($hasPerson['success'] && count($hasPerson['data'])) {
-                        $bool = $this->personUpdate($ip, $person_json)['success'];
-                    } else {
-                        $bool = $this->personCreate($ip, $person_json)['success'];
-                    }
-                    break;
-                case 'DEL':
-                    $re = $this->delPerson($ip, $person_id);
-                    $bool=$re['success'];
-                    info('删除人员',$re);
-                    break;
-                case 'UPD':
-                    $bool = $this->personUpdate($ip, $person_json)['success'];
-                    break;
-                default:
-                    $bool=false;
-
-            }
-
-            $response = $client->request('POST', env('CURL_URL') . '/set_task_status', [
-                'form_params' => [
-                    'id' => $item['id'],
-                    'status'=>$bool?1:-1
-                ],
-            ]);
-            $res1 = json_decode($response->getBody(), true);
-            info('',$res1);
-        }
-        return count($res['data']);
-    }
-
-    public function sync_photo_task(){
-	    $client=new Client();
-        $res = $client->request('POST', env('CURL_URL') . '/get_photo_task', [
-            'form_params' => [
-                'school_id' => env('SCHOOL_ID'),
-                'rasp'=>env('TERMINAL_NUM',false)
-            ],
-        ]);
-        $res = json_decode($res->getBody(), true);
-        info(count($res['data']).'个同步照片任务');
-        $status_data=[];
-        foreach ($res['data'] as $faceimg) {
-            $ip=$faceimg['terminal_ip'];
-            if(!$ip)continue;
-            $fail_msg = '';
-            $person_id = $faceimg['type']=='student'?$faceimg['person_id']:'t'.$faceimg['person_id'];
-            $index=$faceimg['photo_index'];
-            //先下载
-            if(strstr($faceimg['person']['photo_url'],'storage')){
-                $arr=json_decode($faceimg['person']['photo_url'], true);
-                if(isset($arr[$index])){
-                    $url = 'https://app.clovedu.cn' . json_decode($faceimg['person']['photo_url'], true)[$index];
-                }else{
-                    $url='error_index';
-                }
-            }else{
-                $url='empty_json';
-            }
-            info('test   ' . $faceimg['origin']);
-            $base64 = $this->getBase64ByURL($url);
-            if (!$base64) {
-                $fail_msg = '获取线上base64失败！';
-                info('三叶草照片访问失败，跳过该人员' . $faceimg['person_id'],['url'=>$url]);
-                $status_data[$faceimg['id']]=[
-                    'status'=>-1,
-                    'fail_msg'=>$fail_msg
-                ];
-                continue;
-            }
-            $face_ids=['','1','2'];
-
-            $this->del_face_unit2($faceimg,$ip);//TODO:改位置已修改 此方法不可用
-            $rt = $this->createByBase64($ip, $person_id,$person_id.$face_ids[$index], $base64);
-            if (!$rt['success']) {
-                $status_data[$faceimg['id']]=[
-                    'status'=>-1,
-                    'fail_msg'=>$rt['msg']
-                ];
-                info($faceimg['person_id'] . '失败' . $fail_msg);
-                continue;
-            }else{
-                $status_data[$faceimg['id']]=[
-                    'status'=>1,
-                    'fail_msg'=>''
-                ];
-            }
-
-        }
-        if(!count($res['data']))return false;
-        $response1=$client->request('post',env('CURL_URL') . '/set_photo_task_status', [
-            'form_params' => [
-                'data'=>$status_data
-            ],
-        ]);
-        $res1=json_decode($response1->getBody(),true);
-        info($response1->getBody());
-        return count($res['data']);
-
-    }
-
 	public function TakeFaceCallBack($data) {
 //        "imgBase64":"/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAEBAQEBAQEBAQEBAQEBAQEBAQEBA",
 		//        "imgPath":"http://192.168.30.8:8090/apk_imgs/1562312178666.jpg",
@@ -384,7 +257,6 @@ class FaceDetectController {
         $client = new Client();
         try{
             $response = $client->request('POST', env('CURL_URL') . '/getFaceImgDels', [
-                'timeout'=>2,
                 'form_params' => [
                     'school_id' => $school_id,
                     'terminal_num'=>env('TERMINAL_NUM',false)
@@ -451,66 +323,11 @@ class FaceDetectController {
         $res =$this->searchFaceImg($ip, $personId);
         if(!$res['success']){
             $fail_ips[] = $ip;
-            info('[删除照片]ip访问失败，跳过'.$ip);
+            info('ip访问失败，跳过'.$ip);
             return;
-        }
-        foreach ($res['data'] as $item){
-            if(strlen($item['faceId'])>8){
-                info('faceId长度大于8非法faceId='.$item['faceId']."删除");
-                $this->delFaceByFid($ip, $item['faceId']);
-            }
         }
         if ($faceimg['origin'] == 'FACE_TAKE') {
 
-            if(count($res['data'])==3){
-                $this->delFaceByFid($ip, $res['data'][2]['faceId']);
-                info('FACE_TAKE  face_id:'.$res['data'][2]['faceId'] . '删除');
-            }
-        }
-        else {
-//            info(json_encode($res));
-            if(count($res['data'])){
-                $isdel=false;
-                foreach($res['data'] as $k=>$face){
-                    if($face['faceId']==$personId.$face_ids[$faceimg['photo_index']]){
-                        $del=$this->delFaceByFid($ip, $face['faceId']);
-                        $isdel=$face['faceId'];
-                        info('UPLOAD face_id:'.$face['faceId'] . '删除--找到对应-index-'.$faceimg['photo_index'],$del);
-                    }
-                }
-                if(!$isdel){
-                    if(count($res['data'])==3){
-                        $del=$this->delFaceByFid($ip, $res['data'][2]['faceId']);
-                        $isdel=$res['data'][2]['faceId'];
-                        info('未找到对应照片-删除尾部-UPLOAD face_id:'.$res['data'][2]['faceId'] . '删除--删除尾部',$del);
-                    }else{
-                        info('未找到对应照片-当前照片数量-'.count($res['data']).'-不删除');
-                    }
-                }
-            }else{
-                info('UPLOAD 没有照片-不删除--end');
-            }
-
-        }
-    }
-
-    public function del_face_unit2($faceimg,$ip){
-        $face_ids=['','1','2'];
-        $personId=$faceimg['person_id'];
-        $res =$this->searchFaceImg($ip, $personId);
-        if(!$res['success']){
-            $fail_ips[] = $ip;
-            info('[删除照片2]ip访问失败，跳过'.$ip);
-            return;
-        }
-        foreach ($res['data'] as $item){
-            if(strlen($item['faceId'])>8){
-                info('faceId长度大于8非法faceId='.$item['faceId']."删除");
-                $this->delFaceByFid($ip, $item['faceId']);
-            }
-        }
-//        if ($faceimg['func'] == 'FACE_TAKE') {
-        if(false){
             if(count($res['data'])==3){
                 $this->delFaceByFid($ip, $res['data'][2]['faceId']);
                 info('FACE_TAKE  face_id:'.$res['data'][2]['faceId'] . '删除');
@@ -614,47 +431,26 @@ class FaceDetectController {
 			info('test   ' . $faceimg['origin']);
 			$base64 = $this->getBase64ByURL($url);
 			if (!$base64) {
-				$fail_msg = '该人员未上传照片或照片已被删除！';
+				$fail_msg = '获取线上base64失败！';
 				info('三叶草照片访问失败，跳过该人员' . $faceimg['student_id'],['url'=>$url]);
-                $response = $client->request('POST', env('CURL_URL') . '/fail_faceimgs_operations', [
-                    'form_params' => [
-                        'school_id' => $school_id,
-                        'student_id' => $faceimg['student_id'],
-                        'id'=>$faceimg['id'],
-                        'fail_ips' => $fail_ips,
-                        'fail_msg' => $fail_msg,
-                    ],
-                ]);
-                $res = json_decode($response->getBody(), true);
-                info($faceimg['student_id'] . 'OPERATE FACE_IMG 结果', $res);
 				continue;
 			}
 			$face_ids=['','1','2'];
-			//先删除全部设备上该照片
-            info('注册前删除全部设备上该位置照片');
-			foreach ($terminal_ips as $ip){
-                $this->del_face_unit($faceimg,$ip);
-            }
-            info('删除完成开始注册');
-            //在注册
 			foreach ($terminal_ips as $ip) {
 				if (!$suc) {
 					$fail_ips[] = $ip;
 					continue;}
+                $this->del_face_unit($faceimg,$ip);
 				$rt = $this->createByBase64($ip, $student_id,$student_id.$face_ids[$index], $base64);
 				if (!$rt['success']) {
 					$suc = false;
 					$fail_ips[] = $ip;
 					$fail_msg = $rt['msg'];
-					info($faceimg['student_id'] . ' base64注册失败 ' . $fail_msg);
+					info($faceimg['student_id'] . '失败' . $fail_msg);
 					continue;
 				}
 			}
 			if (!$suc && !env('FACE_FORCE_SYNC')) {
-			    info('注册失败-删除所有设备上该位置的照片');
-                foreach ($terminal_ips as $ip){
-                    $this->del_face_unit($faceimg,$ip);
-                }
 				$response = $client->request('POST', env('CURL_URL') . '/fail_faceimgs_operations', [
 					'form_params' => [
 						'school_id' => $school_id,
@@ -847,23 +643,15 @@ class FaceDetectController {
 			if(env('FACE_FORCE_SYNC')&&!$re['success']){
 			    continue;
             }
-            if(array_get($re,'data')){//浔新
-                $fail = $re['data']['invalid'];
-                $fail = explode(',', $fail);
-                $fail_arr = array_keys(array_flip($fail_arr) + array_flip($fail));
-            }else{//海思
-			    $fail_arr=[];
-            }
+			$fail = $re['data']['invalid'];
+			$fail = explode(',', $fail);
+			$fail_arr = array_keys(array_flip($fail_arr) + array_flip($fail));
 		}
 		$fail_str = implode(',', $fail_arr);
 		$redis->set('PERSON_DEL:', $fail_str);
-		if(array_get($re,'data')){//浔新
-            $succ_str=$re['data']['effective'];
-        }else{//海思
-		    $succ_str=$del_str;
-        }
-        $succ=explode(',',$succ_str);
-        info('设备人员删除成功',$succ);
+		$succ_str=$re['data']['effective'];
+		$succ=explode(',',$succ_str);
+		info('设备人员删除成功',$succ);
 		foreach ($succ as $v){
 		    if(!$v)continue;
 		    $info_arr=$redis->get('PERSON:'.$v);
@@ -896,37 +684,20 @@ class FaceDetectController {
 				continue;
 			}
 			$tbool = false;
-			$item_content=json_decode($item,true);
-//            $ips=explode(',',env('NO_ZERO_CARD',''));
-//            info('no_zero_card',$ips);
 			foreach ($terminal_ips as $ip) {
-//                if(is_numeric(array_search($ip,$ips))){
-//                    $item_content['idcardNum']=((int)$item_content['idcardNum']).'';
-//                }
-//                else{
-//
-//                }
-                $item=json_encode($item_content);
 //                $bool=$this->personCreate($ip ,$item);
 				$bool = $this->personUpdate($ip, $item);
 				if ($bool['success']) {
 					$tbool = true;
 				} else {
-                    $bool = $this->personCreate($ip, $item);
-                    if($bool['success']){
-                        $tbool = true;
+					$tbool = false;
+					info($ip . '-' . $item . '-redis更新人员-失败');
+					if(env("FACE_FORCE_SYNC")){
+                        continue;
+                    }else{
+                        $fail_str .= $item . '#';
+                        break;
                     }
-                    else{
-                        $tbool = false;
-                        info($ip . '-' . $item . '-redis更新人员-失败');
-                        if(env("FACE_FORCE_SYNC")){
-                            continue;
-                        }else{
-                            $fail_str .= $item . '#';
-                            break;
-                        }
-                    }
-
 				}
 			}
 			if ($tbool) {
@@ -964,44 +735,16 @@ class FaceDetectController {
 			}
 
 			$arr = json_decode($info, true);
-			$name=array_get($arr,'stu_name')?$arr['stu_name']:array_get($arr,'name');
-            $person_json=json_encode([
-                        'id'=>$arr['id'].'',
-                        'name'=>$name.'',
-                        'idcardNum'=>$arr['card_id'].''
-                    ]);
-//			$v = str_replace('card_id', 'idcardNum', $info);
-//			$v = str_replace('stu_name', 'name', $v);
+			$v = str_replace('card_id', 'idcardNum', $info);
+			$v = str_replace('stu_name', 'name', $v);
 			$tbool = false;
-//			$ips=explode(',',env('NO_ZERO_CARD',''));
-//			info('no_zero_card',$ips);
-			foreach ($terminal_ips as $ip) {
-//			    if(is_numeric(array_search($ip,$ips))){
-//                    $person_json=json_encode([
-//                        'id'=>$arr['id'].'',
-//                        'name'=>$name.'',
-//                        'idcardNum'=>((int)$arr['card_id']).''
-//                    ]);
-////                    info($ip.'-nozero-'.$person_json);
-//                }
-//			    else{
-//                    $person_json=json_encode([
-//                        'id'=>$arr['id'].'',
-//                        'name'=>$name.'',
-//                        'idcardNum'=>$arr['card_id'].''
-//                    ]);
-////                    info($ip.'-zero-'.$person_json);
-//                }
 
+			foreach ($terminal_ips as $ip) {
 				$hasPerson = $this->personFind($ip, $arr['id']);
-//                $hasPerson=[
-//                    'success'=>true,
-//                    'data'=>[1]
-//                ];
 				if ($hasPerson['success'] && count($hasPerson['data'])) {
-					$bool = $this->personUpdate($ip, $person_json)['success'];
+					$bool = $this->personUpdate($ip, $v)['success'];
 				} else {
-					$bool = $this->personCreate($ip, $person_json)['success'];
+					$bool = $this->personCreate($ip, $v)['success'];
 				}
 				if ($bool) {
 					$tbool = true;
@@ -1137,14 +880,13 @@ class FaceDetectController {
 		$client = new Client();
 		$url = $ip . ':8090/person/find';
 		try {
-            $response = $client->request('GET', $url, [
-                'query' => [
-                    'pass' => 'spdc',
-                    'id' => $personId,
-                ],
-            ]);
+			$response = $client->request('POST', $url, [
+				'form_params' => [
+					'pass' => 'spdc',
+					'id' => $personId,
+				],
+			]);
 			$res = json_decode($response->getBody(), true);
-			info($ip.'人员查询-'.$personId,$res);
 			return $res;
 		} catch (\Exception $e) {
 			info('人员查询-异常' . $e->getMessage());
@@ -1166,11 +908,11 @@ class FaceDetectController {
 			if ($res['success']) {
 				return ['success'=>true,'data'=>true];
 			} else {
-				info($ip .'更新人员-' . $personJson . '-失败-', $res);
+				info('更新人员-' . $personJson . '-失败-', $res);
 				return ['success'=>false,'data'=>false];
 			}
 		} catch (\Exception $e) {
-			info($ip .'更新人员-' . $personJson . '-异常-' . $e->getMessage());
+			info('更新人员-' . $personJson . '-异常-' . $e->getMessage());
             return ['success'=>false,'data'=>false];
 		}
 	}
@@ -1186,16 +928,15 @@ class FaceDetectController {
 					'pass' => 'spdc',
 				],
 			]);
-			info('注册人员'.$response->getBody());
 			$res = json_decode($response->getBody(), true);
 			if ($res['success']) {
                 return ['success'=>true,'data'=>true];
 			} else {
-				info($ip .'注册人员-' . $personJson . '-失败-', $res);
+				info('注册人员-' . $personJson . '-失败-', $res);
                 return ['success'=>false,'data'=>false];
 			}
 		} catch (\Exception $e) {
-			info($ip .'注册人员-' . $personJson . '-异常-' . $e->getMessage());
+			info('注册人员-' . $personJson . '-异常-' . $e->getMessage());
             return ['success'=>false,'data'=>false];
 		}
 	}
@@ -1328,8 +1069,7 @@ class FaceDetectController {
         }
 
 		$res = json_decode($res1->getBody(), true);
-		info($ip.'删除人员',$res);
-//		echo $res1->getBody() . PHP_EOL;
+		echo $res1->getBody() . PHP_EOL;
 		return $res;
 	}
 
@@ -1475,13 +1215,6 @@ class FaceDetectController {
                     'imgBase64' => $base64,
                 ],
             ]);
-//            info('',[
-//                'pass' => 'spdc',
-//                'personId' => $personId,
-//                'faceId' => $faceId,
-//                'imgBase64' => $base64,
-//
-//            ]);
         }catch (\Exception $e){
 		    info($e->getMessage());
 		    return [
@@ -1510,7 +1243,7 @@ class FaceDetectController {
 		} else {
 			return [
 				'success' => false,
-				'msg' => array_get($res,'msg')?:'base64注册失败',
+				'msg' => $res['msg'],
 				'data' => $res,
 			];
 
@@ -1610,9 +1343,9 @@ class FaceDetectController {
 
 	//照片查询
 	public function searchFaceImg($ip, $personId) {
-        $client = new Client();
-        $url = $ip . ':8090/face/find';
-        try{
+		$client = new Client();
+		$url = $ip . ':8090/face/find';
+		try{
             $response = $client->request('POST', $url, [
                 'form_params' => [
                     'pass' => 'spdc',
@@ -1622,30 +1355,20 @@ class FaceDetectController {
             $res = json_decode($response->getBody(), true);
 //            info('test_face_find',$res);
         }catch (\Exception $e){
-            info($e->getMessage());
-            return ['success'=>false,'msg'=>$e->getMessage(),'data'=>false];
+		    info($e->getMessage());
+		    return ['success'=>false,'data'=>false];
         }
 //        info('照片查询',[$res]);
-        $data=[];
-        if(!$res['success']&&!array_get($res,'msg')&&$res['result']==0){//海思
-            $res=[
-                'success'=>true,
-                'code'=>'000',
-                'data'=>[],
-                'result'=>1
+		$data=[];
+		foreach ($res['data'] as $item){
+		    $data[]=[
+		        'faceId'=>$item['faceId'],
+                'personId'=>$item['personId'],
+                'path'=>$item['path']
             ];
         }
-        if($res['success']){
-            foreach ($res['data'] as $item){
-                $data[]=[
-                    'faceId'=>$item['faceId'],
-                    'personId'=>$item['personId'],
-                    'path'=>$item['path']
-                ];
-            }
-            info('照片查询-', $data);
-        }
-        return $res;
+		info('照片查询-'.$personId, $data);
+		return $res;
 	}
 
 	//从树莓派上传拍照注册的照片到三叶草
@@ -2257,7 +1980,6 @@ class FaceDetectController {
                 info('人脸识别设备允许时段更新-超时退出',['nowspan'=>$nowspan,'time_limit'=>$time_limit]);
                 break;}
         }
-        return count($list);
 
     }
 

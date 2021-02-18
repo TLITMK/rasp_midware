@@ -2,15 +2,17 @@
 namespace App\Handler;
 
 use App\Http\Controllers\Api\UnionAttController;
+use App\Services\Tools;
 use GuzzleHttp\Client;
 use Illuminate\Support\Facades\Redis;
 use Storage;
 
 class SwooleHandler {
+    use Tools;
 	protected $camera_status;
 	//连接
 	public function onConnect($server, $fd, $from_id) {
-		echo "连接成功" . $fd . PHP_EOL;
+	    echo "连接成功" . $fd . PHP_EOL;
 	}
 
 	//关闭连接
@@ -37,43 +39,56 @@ class SwooleHandler {
 			$server->close($fd);
 		}
 
-		$head = unpack('A2', $data);
-		$len = unpack('v', $data, 2);
-		$terminal = unpack('A2', $data, 4);
+//		$head = unpack('A2', $data);
+//		$len = unpack('v', $data, 2);
+//		$terminal = unpack('A2', $data, 4);
 		$cmd = unpack('H2', $data, 6);
 		$card_arr = unpack('V', $data, 13);
+        $door_num = unpack('C', $data, 17); //通道
+        $enter = unpack('h', $data, 18); //进出
 		info('卡号', [$this->uint32val($card_arr[1])]);
-		info($cmd);
+//		info($cmd);
 		if ($cmd[1] == '0f') {
 			//刷卡抓拍
 			if (env('FACE', false)&&!env('UNION_ATT',false) ) {
-				if (env('NEW_SYNC', false)) {
-					// info('新-人脸设备-刷卡什么也不做');
-					if (env('DISABLE_TAKE_FACE', false)) {
-						info('屏蔽刷卡拍照');
-					} else {
-						$this->face_take_img_new($data);
-					}
-				}
-//                else if(env('SCHOOL_ID',0)==769 ){
-				//                    info('仁德一中特殊');
-				//                }
-				else {
-					info('旧-人脸设备-刷卡抓拍');
-					$this->face_take_img($data);
-				}
+			    $terminal_type=$this->getTerminalTypeForSnap($door_num[1],$enter[1]);
+				if ($terminal_type=='face') {
+                    // info('新-人脸设备-刷卡什么也不做');
+                    if (env('DISABLE_TAKE_FACE', false)) {
+                        info('屏蔽刷卡拍照');
+                    } else {
+//                        $this->face_take_img_new($data);
+                    }
+				}elseif($terminal_type=='snap'){
+                    info('[混合]摄像头设备-刷卡抓拍-已注释');
+//                    $datainfo = [
+//                        'type' => 1,
+//                        'data' => $data,
+//                    ];
+//                    $server->task($datainfo);
+                }
+//
 			}
 			else if(env('UNION_ATT',false)){
 			    //该模式同时存在控制板和人脸识别两条路线
 			    //刷卡不触发人脸识别拍照注册
                 //
-                info('联动开门认证-刷卡抓拍');
+                info('联动开门认证-刷卡抓拍-通道-'.$door_num[1]);
 
                 //语音
 //                $send_data=$this->pack_voice('一二三四五六七八九十一二');
 //                $server->send($fd,$send_data);
 
 //触发抓拍
+                $datainfo = [
+                    'type' => 1,
+                    'data' => $data,
+                    'fd'=>$fd
+                ];
+                $server->task($datainfo);
+            }
+            elseif(env('UNION_ATT_SOFT',false)){
+                info('联动开门认证-软件版刷卡');
                 $datainfo = [
                     'type' => 1,
                     'data' => $data,
@@ -126,11 +141,14 @@ class SwooleHandler {
 	}
 
 	public function pack_voice($string){
+//        $gbk_string="[v10][s5]".$string;
+        $string=' '.$string;
         $body=pack('A2C','VO',0x0b);
         $encode=mb_detect_encoding($string,array("ASCII","UTF-8","GB2312","GBK",'BIG5'));
         $gbk_string=iconv($encode,'gbk//TRANSLIT//IGNORE',$string);
-        $gbk_string.=pack('C',0);
-        $send_data=$body.$gbk_string;
+        $gbk_string="[v10][s5]".$gbk_string;
+//        $gbk_string.=pack('C',0);
+        $send_data=$body.trim($gbk_string).pack('C',0);
         return $send_data;
     }
 
@@ -148,18 +166,18 @@ class SwooleHandler {
 
 			$server->finish($data);
 		} else {
-		    $fd=$data['fd'];
+//		    $fd=$data['fd'];
 			$data_new = $data['data'];
+            $time = unpack('C6', $data_new, 7); //刷卡时间
+            $str_date = "20" . $time[1] . "-" . $time[2] . "-" . $time[3] . " " . $time[4] . ":" . $time[5] . ":" . $time[6];
+            $time_int = strtotime($str_date);
+
+            $card_arr = unpack('V', $data_new, 13); //卡号
+            $door_num = unpack('h', $data_new, 17); //通道
+            $enter = unpack('h', $data_new, 18); //进出
+            $card = $this->uint32val($card_arr[1]);
 			if (env('SNAP_VIDEO')) {
 				//视频抓拍
-				$time = unpack('C6', $data_new, 7); //刷卡时间
-				$str_date = "20" . $time[1] . "-" . $time[2] . "-" . $time[3] . " " . $time[4] . ":" . $time[5] . ":" . $time[6];
-				$time_int = strtotime($str_date);
-
-				$card_arr = unpack('V', $data_new, 13); //卡号
-				$door_num = unpack('h', $data_new, 17); //通道
-				$enter = unpack('h', $data_new, 18); //进出
-				$card = $this->uint32val($card_arr[1]);
 				if ($enter[1] == 1) {
 					$in_out = $door_num[1] * 5 + 1;
 					$enter = 1;
@@ -188,12 +206,19 @@ class SwooleHandler {
 				$server->finish($data1);
 			}
 			else {
-			    if(env('UNION_ATT',false)){
+			    if(env('UNION_ATT',false)){//默认控制板只作为登记器
 			        $this->union_snap($data,$server);
+                }
+                elseif(env('UNION_ATT_SOFT',false)){//区分学生刷卡 家长登记
+			        if(strstr(env('UNION_REG_DOOR'),'D'.$door_num[1])){
+			            $this->union_snap($data,$server);//家长刷卡登记
+                    }
+                    else
+                        $this->union_soft_snap($data,$server);//学生刷卡判断抓拍
                 }
                 else{
                     //图片抓拍
-                    $this->camear_snap($data, $server);
+                    $this->camear_snap($data_new, $server);
                 }
 			}
 
@@ -287,6 +312,186 @@ class SwooleHandler {
 		return $var;
 	}
 
+	protected function union_soft_snap($data,$server){
+//	    info('test',$data);
+        $fd=$data['fd'];
+        $data=$data['data'];
+
+        $time = unpack('C6', $data, 7); //刷卡时间
+        $str_date = "20" . $time[1] . "-" . $time[2] . "-" . $time[3] . " " . $time[4] . ":" . $time[5] . ":" . $time[6];
+        $time_int = strtotime($str_date);
+        $card_arr = unpack('V', $data, 13); //卡号
+        $door_num = unpack('C', $data, 17); //通道
+        $enter = unpack('h', $data, 18); //进出
+        $card = $this->uint32val($card_arr[1]);
+        $ip = $this->get_ip($door_num[1], $enter[1]);
+
+        if ($enter[1] == 1) {
+            $enter = 1; //进
+        } else {
+            $enter = 0;
+        }
+        $allkeys = Redis::keys('PERSON:*');
+        $list = Redis::pipeline(function ($pipe) use ($allkeys) {
+            foreach ($allkeys as $item) {
+                $pipe->get($item);
+            }
+        });
+        $person=false;
+        foreach ($list as $key => $value) {
+            $varr=json_decode($value,true);
+            $all_cards=explode(',',$varr['all_cards']);
+            foreach ($all_cards as $k=>$v){
+                if($v==$card){
+                    $person=$varr;
+                    info('找到人员' . $person['id'].'  '.$card.'  '.$person['stu_name']);
+                }
+            }
+        }
+        if(!$person){
+            info('陌生卡'.$card);
+            //陌生卡 播音 TODO：播音返回
+            $send_data=$this->pack_voice('陌生卡');
+            $server->send($fd,$send_data);
+            return false;
+
+        }
+        else{
+            //找到人员
+            if($enter){//进入
+                info($person['id'].'进校');
+                //什么也不做
+            }
+            else{
+                if(!array_get($person,'union_time',false)){
+                    info($person['id'].'不是联动 正常开门');
+                    //不是联动 往下走开门
+                }
+                else{
+                    info($person['id'].'是联动人员');
+                    //是联动 判断时段
+                    $timestr=$person['union_time'];
+                    $now=date('H:i');
+                    $timearr=json_decode($timestr,true);
+                    $is_in_time=false;
+                    foreach($timearr as $time){
+                        if($now>$time['start_time'] && $now<$time['end_time']){
+                            info('联动时段判断-true',[
+                                'time'=>$time
+                            ]);
+                            $is_in_time=true;
+                            break;
+                        }
+                    }
+                    if(!$is_in_time){
+                        info($person['id'].'不在连动时段 开门');
+                        //不在连动时段 往下走，开门
+                    }
+                    else{
+                        info($person['id'].'在连动时段');
+                        //在联动时段 判断联动是否成功
+                        if(Redis::exists('unionAuthFamilySoft:'.$person['id'])){
+                            info($person['id'].'联动成功 开门');
+                            //成功开门 往下走开门
+                        }
+                        else{
+                            info($person['id'].'联动不成功 返回');
+                            //联动不成功 TODO：波音 返回
+
+                            //控制板语音播音
+                            $send_data=$this->pack_voice('家长未登记');
+                            $server->send($fd,$send_data);
+                            return false;
+                        }
+                    }
+
+                }
+            }
+        }
+        //开门信号
+        info('远程开门 ');
+        $body = pack('A2H2H2H2','SR',$enter[1]==1?'01':'02','f4','01');
+        $server->send($fd,$body);
+        usleep(100000);
+        //控制板语音播音
+        $send_data=$this->pack_voice($person['stu_name']);
+        $server->send($fd,$send_data);
+        //发送考勤
+        $client=new Client();
+        $rt = $client->request('GET', $ip,
+            ['auth' => [env('CAMERA_USER_NAME', 'admin'), env('CAMERA_PWD', 'admin123')]]);
+        file_put_contents(env('PATH_ATT') . '/storage/app/public/att_images/' . $card . $door_num[1] . $time_int . '.jpg', $rt->getBody());
+
+
+        $file = fopen(env('PATH_ATT') . '/storage/app/public/att_images/' . $card . $door_num[1] . $time_int . '.jpg', 'r');
+        $client = new Client();
+        $data = [
+            'dateTime' => date('Y-m-d H:i:s', $time_int),
+            'door_num' => $door_num[1] ? $door_num[1] : 0,
+            'school_code' => env('SCHOOL_CODE', 0), //没用到
+            'card' => $card,
+            'enter' => $enter,
+            'id' => $door_num[1] . $time_int,
+        ];
+        ksort($data);
+        try {
+            $response = $client->request('POST', env('CURL_URL') . '/send_img_attendance', [
+                'verify' => false,
+                'multipart' => [
+                    [
+                        'name' => 'upload_att_image',
+                        'contents' => 'abc',
+                        'headers' => [],
+                    ],
+                    [
+                        'name' => 'image',
+                        'contents' => $file,
+                    ],
+                    [
+                        'name' => 'int_time',
+                        'contents' => $time_int,
+                    ],
+                    [
+                        'name' => 'school_id',
+                        'contents' => env('SCHOOL_ID', 0),
+                    ],
+                    [
+                        'name' => 'card',
+                        'contents' => $card,
+                    ],
+                    [
+                        'name' => 'door_num',
+                        'contents' => $door_num[1] ? $door_num[1] : 0,
+                    ],
+                    [
+                        'name' => 'enter',
+                        'contents' => $enter,
+                    ],
+                    [
+                        'name' => 'type',
+                        'contents' => 1, //没用
+                    ],
+                ],
+            ]);
+        } catch (\Exception $e) {
+            info('刷卡抓拍-三叶草-异常-' . $e->getMessage());
+            return false;
+        }
+        $rt = json_decode($response->getBody(), true);
+
+        //关闭文件资源
+        @fclose($file);
+        info('刷卡抓拍-结果-', [$rt]);
+        if (isset($rt['code'])) {
+            $server->finish($data);
+        } else {
+            system('rm -rf ' . env('PATH_ATT') . '/storage/app/public/att_images/' . $card . $door_num[1] . $time_int . '.jpg');
+            //Storage::disk('att_image')->delete($card.$door_num[1].$time_int.'.jpg');
+        }
+
+
+    }
+
 	protected function union_snap($data,$server){
 	    $fd=$data['fd'];
 	    $data=$data['data'];
@@ -298,55 +503,187 @@ class SwooleHandler {
         $door_num = unpack('C', $data, 17); //通道
         $enter = unpack('h', $data, 18); //进出
         $card = $this->uint32val($card_arr[1]);
-//从redis查找卡号对应的人员 TODO:用卡号查找id这个方式应该测试一下，考虑改成访问三叶草获取
-        $allkeys = Redis::keys('PERSON:*');
-        $list = Redis::pipeline(function ($pipe) use ($allkeys) {
-            foreach ($allkeys as $item) {
-                $pipe->get($item);
-            }
-        });
-        $personId = '';
-        $stu_name='';
-        foreach ($list as $key => $value) {
-            # code...
-            $varr=json_decode($value,true);
-//            info($value);
-            if(!$varr['union_cards']){
-                continue;
-            }
-            $union_cards=explode(',',$varr['union_cards']);
-            foreach ($union_cards as $k=>$v){
-                if($v==$card){
-                    $personId = $varr['id'];
-                    $stu_name=$varr['stu_name'];
-                    info('找到人员' . $personId.'  '.$card.'  '.$stu_name);
-                }
-            }
+        $timetest2=microtime(true);
+
+
+//        $client = new Client();
+//        $url=env('CURL_URL').'/union_auth/get_person_info?card_id='.$card.'&school_id='.env('SCHOOL_ID');
+//        $response=$client->request('GET',$url);
+//        $union_person=json_decode($response->getBody(),true);
+//        if($union_person['code']==1)
+//        {
+//            info('[联动]不存在该卡号对应的联动学生:'.$union_person['msg'] ,[
+//                '单元耗时'=>microtime(true)-$timetest2
+//            ]);
+//            return false;
+//        }
+//        $union_person=$union_person['data'];
+        $person_id=Redis::get('UNION_CARD:'.$card);
+        if($person_id){
+            $union_person=Redis::get('PERSON:'.$person_id);
+            if(!$union_person){
+                info('[联动]redis人员不存:id=' .$person_id,[
+                    '单元耗时'=>microtime(true)-$timetest2
+                ]);
+                return false;}
+            $union_person=json_decode($union_person,true);
+
         }
-        if (!$personId) {
-            info('[联动]不存在该卡号对应的联动学生:' . $personId);
+        else{
+            info('[联动]不存在该卡号对应的联动学生:card=' .$card,[
+                '单元耗时'=>microtime(true)-$timetest2
+            ]);
+            return false;
+        }
+
+        $personId=$union_person['id'];
+        $stu_name=$union_person['stu_name'];
+        info('找到人员' . $personId.'  '.$card.'  '.$stu_name,[
+            '单元耗时'=>microtime(true)-$timetest2
+        ]);
+
+        //开门信号-继电器控制亮灯
+        info('继电器控制亮灯 '.$stu_name);
+        $body = pack('vA2H2H2',5,'yz',sprintf('%02x',(int)71),sprintf('%02x',0));
+        $body = pack('A2H2H2H2','SR',$enter[1]==1?'01':'02','f4','01');
+        $send_data = $this->send_data($body);
+        $server->send($fd,$body);
+        if(!$union_person['union_time']){//学生不是联动
+            info('[联动]学生不是联动-刷卡亮灯返回:' ,[
+                '单元耗时'=>microtime(true)-$timetest2
+            ]);
             return false;
         }
         //控制板语音播音
-        $format=env('UNION_VOICE','');
-        $stu_name=sprintf($format,trim($stu_name));
-        info('语音字符串'.$stu_name);
-        $send_data=$this->pack_voice($stu_name);
-        $server->send($fd,$send_data);
+//        $format=env('UNION_VOICE','');
+//        $stu_name=sprintf($format,trim($stu_name));
+//        info('语音字符串 '.$stu_name);
+//        $send_data=$this->pack_voice($stu_name);
+//        $server->send($fd,$send_data);
 
-        $ip = $this->get_ip($door_num[1], $enter[1]);
-        info($ip);
-        //http 抓拍
-        $client = new Client();
-        $rt = $client->request('GET', $ip,
-            ['auth' => [env('CAMERA_USER_NAME', 'admin'), env('CAMERA_PWD', 'admin123')]]);
 
-        file_put_contents(env('PATH_ATT') . '/storage/app/public/union_auth/' .$personId.'-family.jpg', $rt->getBody());
-        Redis::setex('unionAuthFamily:'.$personId,600,true);
+//        //http 抓拍
+        $timetest3=microtime(true);
+        $time=Redis::get('unionTime');
+        info('刷卡-联动时间'.$time);
+        Redis::setex('unionAuthFamilySoft:'.$personId,$time,time());
 
-//		$contents = Storage::get('public/att_images/' . $card . $door_num[1] . $time_int . '.jpg');
+//        $ip = $this->get_ip($door_num[1], $enter[1]);
+//        info($ip);
+//        //http 抓拍
+//        $timetest3=microtime(true);
+//        info($door_num[1].'通道'.($enter[1]==1?'进':'出'));
+//        if($door_num[1]==1||$door_num[1]==2){
+//
+//            Redis::setex('unionAuthFamilyIn:'.$personId,$time,time());
+//            Redis::set('unionSnapIn',3);
+//            info('刷卡进');
+//        }
+//        elseif($door_num[1]==3||$door_num[1]==4){
+//
+//            Redis::setex('unionAuthFamilyOut:'.$personId,$time,time());
+//            Redis::set('unionSnapOut',3);
+//            info('刷卡出');
+//        }
+        info('设置unionAuthFamilySoft'.$personId.'time='.$time,[
+            '单元耗时'=>microtime(true)-$timetest3
+        ]);
+
+        //发送家长通知
+        //
+        $family_pic=false;
+        $now_time=time()-1;
+        $camera_ip=$this->getPathCameraIP($door_num[1]);
+        $keys=Redis::keys('unionSnapPic'.$camera_ip.'*');
+        if(count($keys)){
+            $family_pic=Redis::get($keys[0]);
+        }
+        else{
+            $family_pic=false;
+        }
+//        for($i=0;$i<5;$i++){
+//            $family_pic=Redis::get('unionSnapPic'.$camera_ip.($now_time-$i));
+//            if($family_pic){
+//                info('[联动]'.$camera_ip.'家长登记-$snap_time='.$now_time.'-find_time='.($now_time-$i));
+//                break;
+//            }
+//            if($door_num[1]==3||$door_num[1]==4){
+//                $family_pic=Redis::get('unionSnapPicOut'.($now_time-$i));
+//                if($family_pic){
+//                    info('[联动]'.$camera_ip.'家长登记-$snap_time='.$now_time.'-find_time='.($now_time-$i));
+//                    break;
+//                }
+//            }
+//            elseif($door_num[1]==1||$door_num[1]==2){
+//                $family_pic=Redis::get('unionSnapPicIn'.($now_time-$i));
+//                if($family_pic){
+//                    info('[联动]30.6家长登记-$snap_time='.$now_time.'-find_time='.($now_time-$i));
+//                    break;
+//                }
+//            }
+//        }
+        if(!$family_pic){
+            info('[联动]家长登记-没找到家长照片-');
+//            info('[联动]家长登记-没找到家长照片-不发送通知');
+//            return false;
+        }
+//        else{
+        if(true){
+            //访问sync_face_test()接口
+            Redis::set('unionFamilyRegist'.$personId,json_encode([
+                'person_id'=>$personId,
+                'card_id'=>$card,
+                'time'=>date('Y-m-d H:i:s',time()),//string Y-m-d H:i:s
+                'imgBase64'=>$family_pic
+            ]));
+//            try {
+//                $send_time4=microtime(true);
+//                $client=new Client();
+//                $response = $client->request('post', env('CURL_URL') . '/union/face/send_union_register', [
+//                    'timeout'=>1,
+//                    'form_params' => [
+//                        'person_id'=>$personId,
+//                        'card_id'=>$card,
+//                        'time'=>date('Y-m-d H:i:s',time()),//string Y-m-d H:i:s
+//                        'imgBase64'=>$family_pic
+//                    ]
+//                ]);
+//                $res=json_decode($response->getBody(),true);
+//                info($personId.'[联动]家长登记-上报推送登记通知',$res);
+//                info('返回252',
+//                    [
+//                        '上报耗时'=>microtime(true)-$send_time4,
+////                        '总耗时'=>microtime(true)-$timestamp
+//                    ]);
+//
+//            }
+//            catch (\Throwable $e) {
+//                info($personId.'[联动]家长登记-'.$e->getMessage());
+//            }
+
+        }
 
     }
+
+    function getPathCameraIP($door_num){
+	    $ipstr=env('UNION_ATT',false);
+	    if(!$ipstr)return false;
+	    $iparr=explode(',',$ipstr);
+	    if($door_num==1||$door_num==2){
+            return array_get($iparr,0);
+        }
+        elseif($door_num==3||$door_num==4){
+            return array_get($iparr,1);
+        }
+        elseif($door_num==5||$door_num==6){
+            return array_get($iparr,2);
+        }
+        elseif($door_num==7||$door_num==8){
+            return array_get($iparr,3);
+        }
+        return false;
+    }
+
 
 	protected function camear_snap($data, $server) {
 		$time = unpack('C6', $data, 7); //刷卡时间
@@ -423,7 +760,8 @@ class SwooleHandler {
 				return false;
 			}
 
-		} else {
+		}
+		else {
 			try {
 				$response = $client->request('POST', env('CURL_URL') . '/send_img_attendance', [
 					'verify' => false,
@@ -620,7 +958,7 @@ class SwooleHandler {
 		$data1 = json_decode($stu, true);
 		$FDC = new FaceDetectController();
 		$getFace = $FDC->searchFaceImg($ip, $data1['id']);
-		if ($getFace['success']) {
+		if ($getFace['data']) {
             $photo_count=count($getFace['data']);
             //设备上每个人员最多三张照片，索引为0，1，2 最新的在0
 			if ($photo_count) {
@@ -639,6 +977,10 @@ class SwooleHandler {
                 }
 			}
 		}
+		else{
+		    info('刷卡-人脸识别-照片查询-接口请求失败');
+		    return;
+        }
 		//拍照注册   这个接口只负责打开拍照界面，拍照注册成不成功并不知道，所以存入redis的信息有可能没有照片
 		$takeImg = $FDC->faceTakeImg($ip, $data1['id']);
 		if (!$takeImg['success']) {

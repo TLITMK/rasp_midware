@@ -76,7 +76,7 @@ class FACE_faceCreatePerson_All extends Command
 //
 //        }
 //        echo $suc_count.'/'.count($info_arr).' 个人员注册成功'.PHP_EOL;
-//        $this->drip->personCreateAll($ip);
-        $this->drip->personCreate769_2019($ip);
+        $this->drip->personCreateAll($ip);
+//        $this->drip->personCreate769_2019($ip);
     }
 }

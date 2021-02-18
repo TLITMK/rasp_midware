@@ -47,22 +47,27 @@ class PI_redis_sub extends Command
         #订阅消息redis
         Redis::subscribe(array('__keyevent@0__:expired'), function($key)  {
             //删除过期回调 用于2.4g设备考勤通知
+//            info('删除回调-'.$key);
+            if(strstr($key,'24g')){
+                info('2.4g删除回调-'.$key.'-推送考勤消息');
+                $arr=explode(':',$key);
+                $cardid=$arr[1];
+                $fd=$arr[2];
+                $timestamp=$arr[3];
+                $school_id=env('SCHOOL_ID');
+                $client=new Client();
+                $response=$client->request('POST',env('CURL_URL').'/24g/att_notice',[
+                    "form_params"=>[
+                        "card_id"=>$cardid,
+                        "school_id"=>$school_id,
+                        "datetime"=>date('Y-m-d H:i:s',$timestamp),
+                        "fd"=>$fd
+                    ]
+                ]);
+            }
+            elseif(strstr($key,'union')){
 
-            info('2.4g删除回调-'.$key.'-推送考勤消息');
-            $arr=explode(':',$key);
-            $cardid=$arr[1];
-            $fd=$arr[2];
-            $timestamp=$arr[3];
-            $school_id=env('SCHOOL_ID');
-            $client=new Client();
-            $response=$client->request('POST',env('CURL_URL').'/24g/att_notice',[
-                "form_params"=>[
-                    "card_id"=>$cardid,
-                    "school_id"=>$school_id,
-                    "datetime"=>date('Y-m-d H:i:s',$timestamp),
-                    "fd"=>$fd
-                ]
-            ]);
+            }
 
         });
     }

@@ -1,0 +1,76 @@
+<html>
+<body>
+
+<!-- 用于展示摄像头视频流 -->
+<video id="video" autoplay style="width: 480px;height: 320px"></video>
+<div>
+    <button id="capture" onclick="handleClickCapture()">123</button>
+</div>
+
+<!-- 展示拍摄的照片 -->
+<canvas id="canvas" width="480" height="320"></canvas>
+
+<script>
+    var video = document.getElementById('video');
+    var capture = document.getElementById('capture');
+    var ctx = document.getElementById('canvas').getContext('2d');
+
+    /**
+     * 调用用户媒体设备
+     * @param constraints 配置信息
+     * @param success 成功回调函数
+     * @param error 失败回调函数
+     */
+    function getUserMediaToPhoto(constraints,success,error) {
+        if(navigator.mediaDevices.getUserMedia){
+            navigator.mediaDevices.getUserMedia(constraints).then(success).catch(error);
+        }else if (navigator.webkitGetUserMedia) {
+            navigator.webkitGetUserMedia(constraints,success,error);
+        }else if(navigator.mozGetUserMedia){
+            navigator.mozGetUserMedia(constraints,success,error);
+        }else if(navigator.getUserMedia){
+            navigator.getUserMedia(constraints,success,error);
+        }
+    }
+
+    /**
+     * 成功回调函数
+     * @param stream 视频流
+     */
+    function success(stream){
+        var CompatibleURL = window.URL || window.webkitURL;
+        try {
+            video.src = CompatibleURL.createObjectURL(stream);
+        } catch (e) {
+            video.srcObject = stream;
+        }
+        video.play();
+    }
+
+    /**
+     * 失败回调
+     * @param error 错误对象
+     */
+    function error(error) {
+        console.log('无法访问媒体设备', error);
+    }
+
+    if(navigator.mediaDevices.getUserMedia || navigator.webkitGetUserMedia || navigator.mozGetUserMedia || navigator.getUserMedia){
+        getUserMediaToPhoto({video:{width:480,height:320}},success,error);
+    }else{
+        alert('不支持访问用户媒体设备');
+    }
+
+    /**
+     * 拍照按钮点击事件
+     */
+    function handleClickCapture() {
+        ctx.drawImage(video,0,0,480,320);
+        var image = new Image();
+        image.src = ctx.toDataURL("image/png");
+        // var base=ctx.getContent();
+        console.log(image);
+    }
+</script>
+</body>
+</html>

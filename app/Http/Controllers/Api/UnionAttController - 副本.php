@@ -19,7 +19,7 @@ class UnionAttController extends Controller
 {
     use Tools;
     public function face_union_auth(Request $request){
-        info('',$request->all());
+//        info('',$request->all());
         $start_time=microtime(true);
         $return=response()->json([
             'result'=>1,
@@ -34,17 +34,14 @@ class UnionAttController extends Controller
         $type=$request->input('type');//'face_0'人员在passtime权限时间内 允许
         $time=$request->input('time');//毫秒时间戳
         $base64_string=$request->input('imgBase64');//不包含【data:image/png;base64,】
-        $now=time();
-        $uptime=$time*0.001;
-        $time_span=$now-$uptime;
-        info($now.'-'.$uptime.'识别回调延时'.($time_span).'秒ip='.$ip);
-        if($time_span>2){
-            info('识别回调延时大于2秒，返回'.$ip);
+
+        info(date('Y-m-d H:i:s',$time*0.001).'-'.time().'识别回调延时'.(time()-$time*0.001).'秒，ip='.$ip);
+        if((time()-$time*0.001)>5)return $return;
+
+        if($type=='face_1'||$type=='card_1'){
+            info($personId.'[联动]时段规则-不允许进出-face_1');
             return $return;
-
         }
-
-
         if(!$personId ){
             info($personId.'[联动]非法请求-personId为空'.(microtime(true)-$start_time));
             info('返回39');
@@ -84,7 +81,7 @@ class UnionAttController extends Controller
         //连动时段判断
         $time_time=microtime(true);
         if(isset($info['union_time']) && $info['union_time']){
-            $timestr=$info['union_time'];
+        $timestr=$info['union_time'];
             $now=date('H:i');
             $timearr=json_decode($timestr,true);
             $is_in_time=false;
@@ -101,6 +98,7 @@ class UnionAttController extends Controller
             }
         }
         if($info['union_cards'] && $is_in_time){//联动学生
+//            return $return;
             $enter_arr = explode('.',$ip);
             $enter = $enter_arr[count($enter_arr)-1]%5;//3 进 4 出
             if($enter==3){//进入 正常开门发送信息
@@ -111,24 +109,49 @@ class UnionAttController extends Controller
             }
             else if ($enter==4){//出校 联动
                 info($personId.'[联动]联动逻辑开始');
-                $camera_ips=explode(',',env('UNION_ATT'));
-                $success=false;
-                foreach ($camera_ips as $cip){
-
-                }
                 //检测联动是否成立
-                if(Redis::exists('unionAuthFamilySoft:'.$personId)){
+                if(Redis::exists('unionAuthFamily:'.$personId)){
                     //执行联动
                     $this->union_att($request,$start_time);
                     info('返回84');
                     return $return;
                 }else{
-                    $this->show_content($ip,'家长未登记，请到一旁等候');
                     info($personId.'[联动]联动不成立');
-                    $this->alert_att($request,$start_time);
                     return $return;
                 }
-
+//                info($personId.'[联动]联动不成立');
+//                if(Redis::exists('unionAuthStudent:'.$personId)){
+//                    info($personId.'[联动]等待状态中'.$personId);
+//                    info('返回90');
+//                    return $return;
+//                }
+//                else{
+//                    $info=[
+//                        'personId'=>$personId,
+//                        'deviceKey'=>$deviceKey,
+//                        'ip'=>$ip,
+//                        'type'=>$type,//'face_0'为非允许时段
+//                        'time'=>$time//毫秒时间戳
+//                    ];
+//                    $info=json_encode($info);
+//                    Redis::setex('unionAuthStudent:'.$personId,Redis::get('unionTime'),$info);
+//                    info($personId.'[联动]添加联动student-redis记录，等待中'.$personId);
+//
+//                    //联动学生 出 保存照片（覆盖）
+//                    $savepic_time=microtime(true);
+//                    $imgdata=base64_decode($base64_string);
+//                    $rt=Storage::put('public/union_auth/'.$personId.'-student.jpg',$imgdata);
+//                    info($personId.'[联动]联动照片student添加-'.$rt.'-'.$personId,
+//                        [
+//                            '单元耗时'=>(microtime(true)-$savepic_time),
+//                            '总耗时'=>(microtime(true)-$start_time)
+//                        ]);
+//                    info('返回109');
+//                    return $return;
+//
+//                }
+//                info('返回113');
+//                return $return;
             }
             info('返回116');
             return $return;
@@ -147,43 +170,44 @@ class UnionAttController extends Controller
     //正常接口
     public function normal_att($info,$start_time){
         $client=new Client();
-
-        if(strstr($info['personId'],'t')){//老师
-            info('[联动]考勤推送时段-数段判断开门-教师-开门');
-        }
-        else{//学生
-
-            if(!$info['ip']){info('[联动]人脸识别开门失败-ip错误'.$info['ip']);return response()->json([
-                'result'=>1,
-                'success'=>true
-            ]);}
-            $iparr=explode('.',$info['ip']);
-            if(count($iparr)<4){info('[联动]人脸识别开门失败-ip错误'.$info['ip']);return response()->json([
-                'result'=>1,
-                'success'=>true
-            ]);}
-            $ipend=$iparr[3];
-            $enter=$ipend%5==3?true:false;
-            $is_open_door=$this->is_open_by_notify_time($enter);
-            if(!$is_open_door){
-                info($info['personId'].'[联动]考勤推送时段-时段判断不开门-也不推送'.$is_open_door);
-                return response()->json([
-                    'result'=>1,
-                    'success'=>true
-                ]);
-            }
-        }
+        //联动 开门 考勤信息转发到正常接口
+        //联动学生 进 开门 考勤信息转发到正常接口
+        //开门
+//        $send_time2=microtime(true);
+//        try{
+//            $url="http://".$info['ip'].":8090/device/openDoorControl";
+//            $response=$client->request('POST',$url,[
+//                'form_params'=>[
+//                    'pass'=>'spdc'
+//                ]
+//            ]);
+//            $res=json_decode($response->getBody(),true);
+//            info($info['personId'].'[联动]正常接口开门',
+//                [
+//                    '请求耗时'=>microtime(true)-$send_time2,
+//                    '总耗时'=>microtime(true)-$start_time
+//                ]);
+//        }catch (GuzzleException $e){
+//            info($e->getMessage());
+//        }
         $this->face_open_door($info,$start_time);
 
         //访问sync_face_test()接口
-        Redis::setex('NORMAL_ATT_INFO:'.$info['personId'],86400,json_encode($info));
-
-
-//        info($info['personId'].'[联动]发送正常考勤 ',
-//            [
-//                '请求耗时'=>microtime(true)-$send_time1,
-//                '总耗时'=>microtime(true)-$start_time
-//            ]);
+        $send_time1=microtime(true);
+        try {
+            $response = $client->request('post', env('CURL_URL') . '/face/sync_face_test', [
+                'form_params' => $info
+            ]);
+            $res=json_decode($response->getBody(),true);
+            info($info['personId'].'[联动]模拟人脸识别上报考勤信息',$res);
+        } catch (GuzzleException $e) {
+            info($e->getMessage());
+        }
+        info($info['personId'].'[联动]发送正常考勤 ',
+            [
+                '请求耗时'=>microtime(true)-$send_time1,
+                '总耗时'=>microtime(true)-$start_time
+            ]);
 
         info('返回162');
         return response()->json([
@@ -191,43 +215,42 @@ class UnionAttController extends Controller
             'success'=>true
         ]);
     }
-    //家长未登记发送通知
-    function alert_att($request ,$start_time){
-        $person_id=$request->input('personId');
-        $time_str=date('Y-m-d H:i:s');
-//        Redis::set('unionAlertInfo:'.$personId,$time_str);
-        try {
-            $send_time4=microtime(true);
-            $client=new Client();
-            $response=$client->request('post',env('CURL_URL').'/union/face/send_union_unregister',[
-                'timeout'=>1,
-                'form_params' => [
-                    'person_id'=>$person_id,
-                    'time_str'=>$time_str,//string Y-m-d H:i:s
-                ]
-            ]);
-            $res=json_decode($response->getBody(),true);
-            info($person_id.'[联动]未登记通知-上报未登记通知',$res);
-            info('返回UnionAttController236',
-                [
-                    '上报耗时'=>microtime(true)-$send_time4,
-//                        '总耗时'=>microtime(true)-$timestamp
-                ]);
-        }
-        catch (\Throwable $e) {
-            info($person_id.'[联动]未登记通知-'.$e->getMessage());
-        }
-    }
 
     //联动认证成功
     function  union_att($request,$start_time){
         $personId=$request->input('personId');
         $deviceKey=$request->input('deviceKey');
         $ip=$request->input('ip');
-        $type=$request->input('type');//'face_0'允许
+        $type=$request->input('type');//'face_0'为非允许时段
         $time=$request->input('time');//毫秒时间戳
         $base64_string=$request->input('imgBase64');//不包含【data:image/png;base64,】
 
+//        Redis::setex('unionAuthFamily:'.$personId,120,true);
+        //取出redis中对应的考勤信息
+//        $att_info=Redis::get('unionAuthStudent:'.$personId);
+//        $att_info=json_decode($att_info,true);
+//        if(!$att_info){
+//            info('【联动】att_info为空');
+//            info('返回179');
+//            return response()->json([
+//                'result'=>1,
+//                'success'=>true
+//            ]);}
+//        $send_time3=microtime(true);
+        //开门
+//            $url="http://".$ip.":8090/device/openDoorControl";
+//            $response=$client->request('POST',$url,[
+//                'form_params'=>[
+//                    'pass'=>'spdc'
+//                ]
+//            ]);
+//            $res=json_decode($response->getBody(),true);
+//            $end_time=microtime(true);
+//            info($personId.'[联动]联动成功-人脸识别开门',
+//                [
+//                    '请求耗时'=>microtime(true)-$send_time3,
+//                    '总耗时'=>microtime(true)-$start_time
+//                ]);
         $this->face_open_door($request->all(),$start_time);
         $info_arr=[
             'personId'=>$personId,
@@ -242,14 +265,18 @@ class UnionAttController extends Controller
     }
 
     function face_open_door($info,$start_time){
-        $type=$info['type'];
-        if($type=='face_1'||$type=='card_1'){
-            info($info['personId'].'[开门信号]时段规则-不允许进出-face_1'.$info['ip']);
-            return;
-        }
         $client=new Client();
         $send_time2=microtime(true);
-
+        if(!$info['ip']){info('[联动]人脸识别开门失败-ip错误'.$info['ip']);return;}
+        $iparr=explode('.',$info['ip']);
+        if(count($iparr)<4){info('[联动]人脸识别开门失败-ip错误'.$info['ip']);return;}
+        $ipend=$iparr[3];
+        $enter=$ipend%5==3?true:false;
+        $is_open_door=$this->is_open_by_notify_time($enter);
+        if(!$is_open_door){
+            info($info['personId'].'[联动]考勤推送时段-时段判断不开门'.$is_open_door);
+            return;
+        }
 
         try{
             $url="http://".$info['ip'].":8090/device/openDoorControl";
@@ -259,13 +286,13 @@ class UnionAttController extends Controller
                 ]
             ]);
             $res=json_decode($response->getBody(),true);
-            info($info['personId'].'[联动]开门信号'.$info['ip'],
+            info($info['personId'].'[联动]正常接口开门',
                 [
                     '请求耗时'=>microtime(true)-$send_time2,
                     '总耗时'=>microtime(true)-$start_time
                 ]);
         }catch (GuzzleException $e){
-            info($info['personId'].'[联动]开门信号'.$e->getMessage());
+            info($e->getMessage());
         }
     }
 
@@ -303,15 +330,11 @@ class UnionAttController extends Controller
     public function sync_att_notify_time(){
         $client=new Client();
         $url=env('CURL_URL').'/get_att_notify_time';
-        try{
-            $response=$client->request('post',$url,[
-                'form_params'=>[
-                    'school_id'=>env('SCHOOL_ID',false)
-                ]
-            ]);
-        }catch (\Exception $e){
-            return ['error_msg'=>$e->getMessage()];
-        }
+        $response=$client->request('post',$url,[
+            'form_params'=>[
+                'school_id'=>env('SCHOOL_ID',false)
+            ]
+        ]);
         $res=json_decode($response->getBody(),true);
         Redis::set('ATT_NOTIFY_TIME',json_encode($res));
         return $res;
@@ -375,18 +398,7 @@ class UnionAttController extends Controller
             'url'=>$res_url
         ];
     }
-    public function show_content($ip,$content,$speak='false'){
-        $client=new Client();
-        $url=$ip.':8090/api/v2/device/showMessage';
-        $response=$client->request('POST',$url,[
-            'form_params'=>[
-                'pass'=>'spdc',
-                'content'=>$content,
-                'speak'=>$speak
-            ]
-        ]);
-        echo $response->getBody();
-    }
+
 
 
 }

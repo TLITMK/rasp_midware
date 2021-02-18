@@ -1,28 +1,25 @@
 <?php
-/**
- * Created by PhpStorm.
- * User: SPDC-07
- * Date: 2019/7/17
- * Time: 14:41
- */
 
 namespace App\Console\Commands;
-
 
 use App\Handler\FaceDetectController;
 use Illuminate\Console\Command;
 
-class PI_excuteFaceImgOpts extends Command
+class FACE_show_msg extends Command
 {
-    protected $signature = 'PI:excute_faceimg_upload {count}';
+    /**
+     * The name and signature of the console command.
+     *
+     * @var string
+     */
+    protected $signature = 'FACE:show_msg {ip} {msg} {speak}';
 
     /**
      * The console command description.
      *
      * @var string
      */
-    protected $description = '手动同步上传的照片 一般5分钟自动执行';
-
+    protected $description = '人脸识别显示消息提示';
     protected $drip;
 
     /**
@@ -43,8 +40,11 @@ class PI_excuteFaceImgOpts extends Command
      */
     public function handle()
     {
-        $count=$this->argument('count') ;
-//        $this->drip->excuteFaceDel();
-        $this->drip->excuteFaceImgUpload($count);
+        //
+        $ip=$this->argument('ip');
+        $msg=$this->argument('msg');
+        $speak=$this->argument('speak');
+
+        $this->drip->show_content($ip,$msg,$speak);
     }
 }
